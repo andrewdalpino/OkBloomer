@@ -1,3 +1,6 @@
+- 1.1.0
+    - Hash function is now configurable
+
 - 1.0.0
     - No changes
 

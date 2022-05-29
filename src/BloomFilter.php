@@ -5,7 +5,6 @@ namespace OkBloomer;
 use OkBloomer\Exceptions\InvalidArgumentException;
 
 use function count;
-use function crc32;
 use function round;
 use function max;
 use function log;
@@ -26,11 +25,32 @@ use function end;
 class BloomFilter
 {
     /**
-     * The maximum 32 bit integer.
+     * The CRC32b callback function.
+     *
+     * @var callable(string):int
+     */
+    public const CRC32 = 'crc32';
+
+    /**
+     * The MurmurHash3 callback function.
+     *
+     * @var callable(string):int
+     */
+    public const MURMUR3 = [self::class, 'murmur3'];
+
+    /**
+     * The FNV1 callback function.
+     *
+     * @var callable(string):int
+     */
+    public const FNV1 = [self::class, 'fnv1'];
+
+    /**
+     * The maximum size of a layer slice.
      *
      * @var int
      */
-    protected const MAX_32_BIT_INTEGER = 2147483647;
+    protected const MAX_SLICE_SIZE = 2147483647;
 
     /**
      * The false positive rate to remain below.
@@ -75,6 +95,13 @@ class BloomFilter
     protected int $m;
 
     /**
+     * The hash function that accepts a string token and returns an integer.
+     *
+     * @var callable(string):int
+     */
+    protected $hashFn;
+
+    /**
      * The number of items in the filter.
      *
      * @var int
@@ -82,15 +109,39 @@ class BloomFilter
     protected int $n = 0;
 
     /**
+     * The 32-bit MurmurHash3 hashing function.
+     *
+     * @param string $token
+     * @return int
+     */
+    public static function murmur3(string $token) : int
+    {
+        return intval(hash('murmur3a', $token), 16);
+    }
+
+    /**
+     * The 32-bit FNV1a hashing function.
+     *
+     * @param string $token
+     * @return int
+     */
+    public static function fnv1(string $token) : int
+    {
+        return intval(hash('fnv1a32', $token), 16);
+    }
+
+    /**
      * @param float $maxFalsePositiveRate
      * @param int|null $numHashes
      * @param int $layerSize
+     * @param callable(string):int|null $hashFn
      * @throws \OkBloomer\Exceptions\InvalidArgumentException
      */
     public function __construct(
         float $maxFalsePositiveRate = 0.01,
         ?int $numHashes = 4,
-        int $layerSize = 32000000
+        int $layerSize = 32000000,
+        ?callable $hashFn = null
     ) {
         if ($maxFalsePositiveRate < 0.0 or $maxFalsePositiveRate > 1.0) {
             throw new InvalidArgumentException('Max false positive rate'
@@ -113,9 +164,9 @@ class BloomFilter
 
         $sliceSize = (int) round($layerSize / $numHashes);
 
-        if ($sliceSize > self::MAX_32_BIT_INTEGER) {
+        if ($sliceSize > self::MAX_SLICE_SIZE) {
             throw new InvalidArgumentException('Layer slice size'
-                . ' must be less than ' . self::MAX_32_BIT_INTEGER
+                . ' must be less than ' . self::MAX_SLICE_SIZE
                 . ", $sliceSize given.");
         }
 
@@ -125,6 +176,7 @@ class BloomFilter
         $this->sliceSize = $sliceSize;
         $this->layers = [new BooleanArray($layerSize)];
         $this->m = $layerSize;
+        $this->hashFn = $hashFn ?? self::CRC32;
     }
 
     /**
@@ -234,16 +286,16 @@ class BloomFilter
      */
     public function insert(string $token) : void
     {
-        $hashes = $this->hashes($token);
+        $offsets = $this->hash($token);
 
         /** @var \OkBloomer\BooleanArray $layer */
         $layer = end($this->layers);
 
         $changed = false;
 
-        foreach ($hashes as $hash) {
-            if (!$layer[$hash]) {
-                $layer[$hash] = true;
+        foreach ($offsets as $offset) {
+            if (!$layer[$offset]) {
+                $layer[$offset] = true;
 
                 ++$this->n;
 
@@ -251,10 +303,8 @@ class BloomFilter
             }
         }
 
-        if ($changed) {
-            if ($this->falsePositiveRate() > $this->maxFalsePositiveRate) {
-                $this->addLayer();
-            }
+        if ($changed and $this->falsePositiveRate() > $this->maxFalsePositiveRate) {
+            $this->addLayer();
         }
     }
 
@@ -266,15 +316,15 @@ class BloomFilter
      */
     public function existsOrInsert(string $token) : bool
     {
-        $hashes = $this->hashes($token);
+        $offsets = $this->hash($token);
 
         $q = count($this->layers) - 1;
 
         for ($i = 0; $i < $q; ++$i) {
             $layer = $this->layers[$i];
 
-            foreach ($hashes as $hash) {
-                if (!$layer[$hash]) {
+            foreach ($offsets as $offset) {
+                if (!$layer[$offset]) {
                     continue 2;
                 }
             }
@@ -287,9 +337,9 @@ class BloomFilter
 
         $exists = true;
 
-        foreach ($hashes as $hash) {
-            if (!$layer[$hash]) {
-                $layer[$hash] = true;
+        foreach ($offsets as $offset) {
+            if (!$layer[$offset]) {
+                $layer[$offset] = true;
 
                 ++$this->n;
 
@@ -297,10 +347,8 @@ class BloomFilter
             }
         }
 
-        if (!$exists) {
-            if ($this->falsePositiveRate() > $this->maxFalsePositiveRate) {
-                $this->addLayer();
-            }
+        if (!$exists and $this->falsePositiveRate() > $this->maxFalsePositiveRate) {
+            $this->addLayer();
         }
 
         return $exists;
@@ -314,11 +362,11 @@ class BloomFilter
      */
     public function exists(string $token) : bool
     {
-        $hashes = $this->hashes($token);
+        $offsets = $this->hash($token);
 
         foreach ($this->layers as $layer) {
-            foreach ($hashes as $hash) {
-                if (!$layer[$hash]) {
+            foreach ($offsets as $offset) {
+                if (!$layer[$offset]) {
                     continue 2;
                 }
             }
@@ -340,24 +388,24 @@ class BloomFilter
     }
 
     /**
-     * Return an array of hashes from a given token.
+     * Return an array of offsets from a given token.
      *
      * @param string $token
      * @return list<int>
      */
-    protected function hashes(string $token) : array
+    protected function hash(string $token) : array
     {
-        $hashes = [];
+        $offsets = [];
 
         for ($i = 1; $i <= $this->numHashes; ++$i) {
-            $hash = crc32("{$i}{$token}");
+            $offset = call_user_func($this->hashFn, "{$i}{$token}");
 
-            $hash %= $this->sliceSize;
-            $hash *= $i;
+            $offset %= $this->sliceSize;
+            $offset *= $i;
 
-            $hashes[] = (int) $hash;
+            $offsets[] = (int) $offset;
         }
 
-        return $hashes;
+        return $offsets;
     }
 }

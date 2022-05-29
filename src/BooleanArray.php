@@ -122,6 +122,7 @@ class BooleanArray implements ArrayAccess, Countable
      * @throws \OkBloomer\Exceptions\InvalidArgumentException
      * @return bool
      */
+    #[\ReturnTypeWillChange]
     public function offsetGet($offset) : bool
     {
         if (!$this->offsetExists($offset)) {
