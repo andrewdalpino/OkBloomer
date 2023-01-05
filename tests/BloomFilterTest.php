@@ -21,7 +21,7 @@ class BloomFilterTest extends TestCase
      */
     protected function setUp() : void
     {
-        $this->filter = new BloomFilter(0.001, 3, 1024, BloomFilter::CRC32);
+        $this->filter = new BloomFilter(0.001, 3, 1024, 'crc32');
     }
 
     /**

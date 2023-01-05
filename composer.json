@@ -35,7 +35,10 @@
         "psr-4": {
             "OkBloomer\\Benchmarks\\": "benchmarks/",
             "OkBloomer\\Tests\\": "tests/"
-        }
+        },
+        "files": [
+            "src/hash_functions.php"
+        ]
     },
     "scripts": {
         "analyze": "phpstan analyse -c phpstan.neon",
@@ -56,7 +59,10 @@
     "config": {
         "preferred-install": "dist",
         "sort-packages": true,
-        "process-timeout": 3000
+        "process-timeout": 3000,
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        }
     },
     "funding": [
         {

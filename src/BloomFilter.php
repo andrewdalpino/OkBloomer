@@ -5,6 +5,7 @@ namespace OkBloomer;
 use OkBloomer\Exceptions\InvalidArgumentException;
 
 use function count;
+use function call_user_func;
 use function round;
 use function max;
 use function log;
@@ -19,38 +20,30 @@ use function end;
  * [1] P. S. Almeida et al. (2007). Scalable Bloom Filters.
  *
  * @category    Data Structures
- * @package     Scienide/OkBloomer
- * @author      Andrew DalPino
+ * @package     andrewdalpino/OkBloomer
  */
 class BloomFilter
 {
     /**
-     * The CRC32b callback function.
+     * The default hash function.
      *
      * @var callable(string):int
      */
-    public const CRC32 = 'crc32';
+    public const DEFAULT_HASH_FN = 'crc32';
 
     /**
-     * The MurmurHash3 callback function.
+     * The maximum number of bits of the hash function to use per slice.
      *
-     * @var callable(string):int
+     * @var int
      */
-    public const MURMUR3 = [self::class, 'murmur3'];
-
-    /**
-     * The FNV1 callback function.
-     *
-     * @var callable(string):int
-     */
-    public const FNV1 = [self::class, 'fnv1'];
+    protected const MAX_BITS_PER_SLICE = 32;
 
     /**
      * The maximum size of a layer slice.
      *
      * @var int
      */
-    protected const MAX_SLICE_SIZE = 2147483647;
+    protected const MAX_SLICE_SIZE = 2 ** self::MAX_BITS_PER_SLICE;
 
     /**
      * The false positive rate to remain below.
@@ -60,18 +53,18 @@ class BloomFilter
     protected $maxFalsePositiveRate;
 
     /**
-     * The number of hash functions used, i.e. the number of slices per layer.
-     *
-     * @var int
-     */
-    protected int $numHashes;
-
-    /**
      * The size of each layer of the filter in bits.
      *
      * @var int
      */
     protected $layerSize;
+
+    /**
+     * The number of hash functions used, i.e. the number of slices per layer.
+     *
+     * @var int
+     */
+    protected int $numSlices;
 
     /**
      * The size of each slice of each layer in bits.
@@ -109,37 +102,15 @@ class BloomFilter
     protected int $n = 0;
 
     /**
-     * The 32-bit MurmurHash3 hashing function.
-     *
-     * @param string $token
-     * @return int
-     */
-    public static function murmur3(string $token) : int
-    {
-        return intval(hash('murmur3a', $token), 16);
-    }
-
-    /**
-     * The 32-bit FNV1a hashing function.
-     *
-     * @param string $token
-     * @return int
-     */
-    public static function fnv1(string $token) : int
-    {
-        return intval(hash('fnv1a32', $token), 16);
-    }
-
-    /**
      * @param float $maxFalsePositiveRate
-     * @param int|null $numHashes
+     * @param int|null $numSlices
      * @param int $layerSize
      * @param callable(string):int|null $hashFn
      * @throws \OkBloomer\Exceptions\InvalidArgumentException
      */
     public function __construct(
         float $maxFalsePositiveRate = 0.01,
-        ?int $numHashes = 4,
+        ?int $numSlices = 4,
         int $layerSize = 32000000,
         ?callable $hashFn = null
     ) {
@@ -148,35 +119,34 @@ class BloomFilter
                 . "  must be between 0 and 1, $maxFalsePositiveRate given.");
         }
 
-        if (isset($numHashes) and $numHashes < 1) {
-            throw new InvalidArgumentException('Number of hashes'
-                . " must be greater than 1, $numHashes given.");
+        if (isset($numSlices) and $numSlices < 1) {
+            throw new InvalidArgumentException('Number of slices'
+                . " must be greater than 1, $numSlices given.");
         }
 
-        if ($numHashes === null) {
-            $numHashes = max(1, (int) log(1.0 / $maxFalsePositiveRate, 2));
+        if ($numSlices === null) {
+            $numSlices = max(1, (int) log(1.0 / $maxFalsePositiveRate, 2));
         }
 
-        if ($layerSize < $numHashes) {
+        if ($numSlices > $layerSize) {
             throw new InvalidArgumentException('Layer size must be'
-                . " greater than $numHashes, $layerSize given.");
+                . " greater than $numSlices, $layerSize given.");
         }
 
-        $sliceSize = (int) round($layerSize / $numHashes);
+        $sliceSize = (int) round($layerSize / $numSlices);
 
         if ($sliceSize > self::MAX_SLICE_SIZE) {
-            throw new InvalidArgumentException('Layer slice size'
-                . ' must be less than ' . self::MAX_SLICE_SIZE
-                . ", $sliceSize given.");
+            throw new InvalidArgumentException('Slice size must be less'
+                . ' than ' . self::MAX_SLICE_SIZE . ", $sliceSize given.");
         }
 
         $this->maxFalsePositiveRate = $maxFalsePositiveRate;
-        $this->numHashes = $numHashes;
         $this->layerSize = $layerSize;
+        $this->numSlices = $numSlices;
         $this->sliceSize = $sliceSize;
         $this->layers = [new BooleanArray($layerSize)];
         $this->m = $layerSize;
-        $this->hashFn = $hashFn ?? self::CRC32;
+        $this->hashFn = $hashFn ?? self::DEFAULT_HASH_FN;
     }
 
     /**
@@ -190,16 +160,6 @@ class BloomFilter
     }
 
     /**
-     * Return the number of hash functions used in the filter.
-     *
-     * @return int
-     */
-    public function numHashes() : int
-    {
-        return $this->numHashes;
-    }
-
-    /**
      * Return the size of each layer of the filter.
      *
      * @return int
@@ -207,6 +167,16 @@ class BloomFilter
     public function layerSize() : int
     {
         return $this->layerSize;
+    }
+
+    /**
+     * Return the number of hash functions used in the filter.
+     *
+     * @return int
+     */
+    public function numSlices() : int
+    {
+        return $this->numSlices;
     }
 
     /**
@@ -276,11 +246,11 @@ class BloomFilter
      */
     public function falsePositiveRate() : float
     {
-        return $this->utilization() ** $this->numHashes;
+        return $this->utilization() ** $this->numSlices;
     }
 
     /**
-     * Insert an element into the filter.
+     * Embed an element into the filter.
      *
      * @param string $token
      */
@@ -388,7 +358,7 @@ class BloomFilter
     }
 
     /**
-     * Return an array of offsets from a given token.
+     * Return an array of hash offsets from a given token.
      *
      * @param string $token
      * @return list<int>
@@ -397,7 +367,7 @@ class BloomFilter
     {
         $offsets = [];
 
-        for ($i = 1; $i <= $this->numHashes; ++$i) {
+        for ($i = 1; $i <= $this->numSlices; ++$i) {
             $offset = call_user_func($this->hashFn, "{$i}{$token}");
 
             $offset %= $this->sliceSize;

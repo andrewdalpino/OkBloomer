@@ -19,8 +19,7 @@ use function str_repeat;
  * @internal
  *
  * @category    Data Structures
- * @package     Scienide/OkBloomer
- * @author      Andrew DalPino
+ * @package     andrewdalpino/OkBloomer
  *
  * @implements ArrayAccess<int, bool>
  */

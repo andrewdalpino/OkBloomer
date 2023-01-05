@@ -1,5 +1,7 @@
-- 1.1.0
+- 2.0.0
     - Hash function is now configurable
+    - Changed name of num slices argument
+    - Method `numHashes()` is now `numSlices()`
 
 - 1.0.0
     - No changes

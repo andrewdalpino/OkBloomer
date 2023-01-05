@@ -34,5 +34,7 @@ class BooleanArrayTest extends TestCase
         $this->bitmap[42] = true;
 
         $this->assertTrue($this->bitmap[42]);
+
+        $this->assertFalse($this->bitmap[41]);
     }
 }
