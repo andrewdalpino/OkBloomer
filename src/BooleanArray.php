@@ -3,7 +3,9 @@
 namespace OkBloomer;
 
 use OkBloomer\Exceptions\InvalidArgumentException;
+use IteratorAggregate;
 use ArrayAccess;
+use Traversable;
 use Countable;
 
 use function chr;
@@ -23,7 +25,7 @@ use function str_repeat;
  *
  * @implements ArrayAccess<int, bool>
  */
-class BooleanArray implements ArrayAccess, Countable
+class BooleanArray implements ArrayAccess, Countable, IteratorAggregate
 {
     /**
      * The number of bits in one byte.
@@ -145,6 +147,18 @@ class BooleanArray implements ArrayAccess, Countable
     public function offsetUnset($offset) : void
     {
         $this->offsetSet($offset, false);
+    }
+
+    /**
+     * Return an iterator for the values in the array.
+     *
+     * @return \Generator<bool>
+     */
+    public function getIterator() : Traversable
+    {
+        for ($offset = 0; $offset < $this->size; ++$offset) {
+            yield $this->offsetGet($offset);
+        }
     }
 
     /**

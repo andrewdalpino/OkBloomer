@@ -14,7 +14,7 @@ use function end;
 /**
  * Bloom Filter
  *
- * A probabilistic data structure that estimates the prior occurrence of a given item with a maximum false positive rate.
+ * A probabilistic data structure that estimates the prior occurrence of a value with a maximum false positive rate.
  *
  * References:
  * [1] P. S. Almeida et al. (2007). Scalable Bloom Filters.
@@ -220,7 +220,7 @@ class BloomFilter
     }
 
     /**
-     * Return the proportion of bits that are set.
+     * Return the proportion of the filter that is utilized.
      *
      * @return float
      */
@@ -230,7 +230,7 @@ class BloomFilter
     }
 
     /**
-     * Return the proportion of bits that are not set.
+     * Return the proportion of filter that is free.
      *
      * @return float
      */
