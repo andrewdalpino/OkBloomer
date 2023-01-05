@@ -24,6 +24,7 @@ use function str_repeat;
  * @package     andrewdalpino/OkBloomer
  *
  * @implements ArrayAccess<int, bool>
+ * @implements IteratorAggregate<int,bool>
  */
 class BooleanArray implements ArrayAccess, Countable, IteratorAggregate
 {
