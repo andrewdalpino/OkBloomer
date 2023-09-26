@@ -47,4 +47,20 @@ class BloomFilterTest extends TestCase
 
         $this->assertTrue($this->filter->exists('foo'));
     }
+
+    /**
+     * @test
+     * @return void
+     */
+    public function serialize() : void
+    {
+        $this->filter->insert('example');
+
+        $copy = unserialize(serialize($this->filter));
+
+        $this->assertEquals($this->filter, $copy);
+
+        $this->assertTrue($copy->exists('example'));
+        $this->assertFalse($copy->exists('example2'));
+    }
 }
